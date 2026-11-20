@@ -1,0 +1,140 @@
+<!DOCTYPE html>
+<html lang="uk">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ArUco Markers Gallery (DICT_4X4_1000)</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            background: #18181b;
+            color: #f4f4f5;
+            padding: 24px;
+            margin: 0;
+            text-align: center;
+        }
+        h1 { color: #4ade80; margin-bottom: 6px; }
+        p { color: #a1a1aa; max-width: 650px; margin: 0 auto 20px auto; line-height: 1.5; font-size: 14px; }
+        .controls {
+            margin-bottom: 24px;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            gap: 12px;
+        }
+        select, input {
+            background: #27272a;
+            color: #fff;
+            border: 1px solid #3f3f46;
+            padding: 8px 12px;
+            border-radius: 6px;
+            font-size: 14px;
+            outline: none;
+        }
+        .grid {
+            display: flex;
+            flex-wrap: wrap;
+            justify-content: center;
+            gap: 20px;
+            max-width: 960px;
+            margin: 0 auto;
+        }
+        .card {
+            background: #27272a;
+            border: 1px solid #3f3f46;
+            border-radius: 12px;
+            padding: 16px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            width: 170px;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.4);
+        }
+        canvas.marker-canvas {
+            width: 140px;
+            height: 140px;
+            background: #ffffff;
+            padding: 8px;
+            border-radius: 8px;
+            image-rendering: pixelated;
+        }
+        .label {
+            font-size: 15px;
+            font-weight: bold;
+            color: #22c55e;
+            margin-top: 10px;
+        }
+    </style>
+</head>
+<body>
+    <h1>Галерея ArUco-маркерів</h1>
+    <p>Відкрийте цю сторінку на смартфоні або іншому екрані (чи роздрукуйте) та покажіть вебкамері для перевірки розпізнавання та кута нахилу у Scratch!</p>
+
+    <div class="controls">
+        <label for="dict-select">Словник:</label>
+        <select id="dict-select">
+            <option value="DICT_4X4_1000" selected>DICT_4X4_1000</option>
+            <option value="DICT_4X4_50">DICT_4X4_50</option>
+            <option value="DICT_4X4_100">DICT_4X4_100</option>
+            <option value="DICT_4X4_250">DICT_4X4_250</option>
+            <option value="DICT_6X6_250">DICT_6X6_250</option>
+        </select>
+        <span id="loading-indicator" style="color: #4ade80;">Генерація маркерів...</span>
+    </div>
+
+    <div class="grid" id="marker-grid"></div>
+
+    <script>
+        var Module = {
+            onRuntimeInitialized: function() {
+                document.getElementById('loading-indicator').style.display = 'none';
+                generateMarkers();
+            }
+        };
+    </script>
+    <script src="libs/opencv/opencv-4.14.js"></script>
+
+    <script>
+        const grid = document.getElementById('marker-grid');
+        const dictSelect = document.getElementById('dict-select');
+
+        function generateMarkers() {
+            grid.innerHTML = '';
+            if (!window.cv || !window.cv.aruco_ArucoDetector) return;
+
+            const dictName = dictSelect.value;
+            const dictConstant = window.cv[dictName] !== undefined ? window.cv[dictName] : window.cv.DICT_4X4_1000;
+            const dictionary = window.cv.getPredefinedDictionary(dictConstant);
+
+            const size = 200; // Розмір у пікселях
+            const borderBits = 1;
+
+            // Генеруємо маркери з ID 0 до 11
+            for (let id = 0; id <= 11; id++) {
+                const card = document.createElement('div');
+                card.className = 'card';
+
+                const canvas = document.createElement('canvas');
+                canvas.className = 'marker-canvas';
+                canvas.width = size;
+                canvas.height = size;
+
+                const markerMat = new window.cv.Mat();
+                window.cv.generateImageMarker(dictionary, id, size, markerMat, borderBits);
+                window.cv.imshow(canvas, markerMat);
+                markerMat.delete();
+
+                const label = document.createElement('div');
+                label.className = 'label';
+                label.textContent = `ArUco #${id}`;
+
+                card.appendChild(canvas);
+                card.appendChild(label);
+                grid.appendChild(card);
+            }
+        }
+
+        dictSelect.addEventListener('change', generateMarkers);
+    </script>
+</body>
+</html>

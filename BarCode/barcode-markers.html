@@ -1,0 +1,73 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <title>Barcode Markers (3x3 Matrix) for AR</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            background: #18181b;
+            color: #f4f4f5;
+            padding: 24px;
+            margin: 0;
+            text-align: center;
+        }
+        h1 { color: #4ade80; margin-bottom: 8px; }
+        p { color: #a1a1aa; max-width: 600px; margin: 0 auto 24px auto; line-height: 1.5; }
+        .grid {
+            display: flex;
+            flex-wrap: wrap;
+            justify-content: center;
+            gap: 24px;
+            max-width: 900px;
+            margin: 0 auto;
+        }
+        .card {
+            background: #27272a;
+            border: 1px solid #3f3f46;
+            border-radius: 12px;
+            padding: 16px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            width: 180px;
+        }
+        .marker-img {
+            width: 140px;
+            height: 140px;
+            background: #ffffff;
+            padding: 10px;
+            border-radius: 8px;
+            image-rendering: pixelated;
+        }
+        .label {
+            font-size: 16px;
+            font-weight: bold;
+            color: #22c55e;
+            margin-top: 10px;
+        }
+    </style>
+</head>
+<body>
+    <h1>Barcode-маркери (3x3 Matrix) для AR</h1>
+    <p>Покажіть будь-який із цих маркерів вебкамері (можна відкрити цю сторінку на смартфоні або роздрукувати). Програма автоматично виявить маркер, обчислить кут нахилу та передасть його у Scratch!</p>
+
+    <div class="grid" id="marker-grid"></div>
+
+    <script>
+        const grid = document.getElementById('marker-grid');
+        const baseUrl = 'https://raw.githubusercontent.com/nicolocarpignoli/artoolkit-barcode-markers-collection/master/3x3/';
+        
+        // Відображаємо маркери 1-12
+        for (let i = 1; i <= 12; i++) {
+            const card = document.createElement('div');
+            card.className = 'card';
+            card.innerHTML = `
+                <img class="marker-img" src="${baseUrl}${i}.png" alt="Barcode #${i}">
+                <div class="label">Маркер #${i}</div>
+            `;
+            grid.appendChild(card);
+        }
+    </script>
+</body>
+</html>

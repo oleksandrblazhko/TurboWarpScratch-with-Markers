@@ -1,0 +1,534 @@
+<!DOCTYPE html>
+<html lang="uk">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, user-scalable=no, minimum-scale=1.0, maximum-scale=1.0">
+    <title>AR Marker Angle Visualizer & WebSocket Relay</title>
+
+    <!-- Бібліотеки Three.js та AR.js (jsartoolkit5 + threex) -->
+    <script src="../js/three.js"></script>
+    <script src="../jsartoolkit5/artoolkit.min.js"></script>
+    <script src="../jsartoolkit5/artoolkit.api.js"></script>
+    <script src="../threex/threex-artoolkitsource.js"></script>
+    <script src="../threex/threex-artoolkitcontext.js"></script>
+    <script src="../threex/threex-arbasecontrols.js"></script>
+    <script src="../threex/threex-armarkercontrols.js"></script>
+
+    <!-- Окремий модуль візуалізації зеленої рамки та розрахунку кута нахилу -->
+    <script src="../js/marker-angle-visualizer.js"></script>
+
+    <style>
+        * {
+            box-sizing: border-box;
+        }
+
+        body {
+            margin: 0;
+            overflow: hidden;
+            font-family: Arial, Helvetica, sans-serif;
+            background-color: #000;
+            user-select: none;
+            -webkit-user-select: none;
+        }
+
+        /* Відеопотік камери на весь екран */
+        body > video {
+            position: fixed !important;
+            top: 0 !important;
+            left: 0 !important;
+            width: 100vw;
+            height: 100vh;
+            object-fit: cover;
+            z-index: -2 !important;
+        }
+
+        /* Стартовий екран запуску камери */
+        #start-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(10, 15, 20, 0.95);
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            z-index: 1000;
+            color: #ffffff;
+            text-align: center;
+            padding: 20px;
+            cursor: pointer;
+        }
+
+        #start-overlay h1 {
+            font-size: 26px;
+            margin-bottom: 12px;
+            color: #00ff66;
+        }
+
+        #start-overlay p {
+            font-size: 16px;
+            line-height: 1.6;
+            max-width: 520px;
+            color: #cccccc;
+            margin-bottom: 16px;
+        }
+
+        .camera-hint {
+            font-size: 15px;
+            color: #00ff66;
+            background: rgba(0, 255, 102, 0.15);
+            border: 1px solid rgba(0, 255, 102, 0.4);
+            padding: 8px 18px;
+            border-radius: 20px;
+            margin-bottom: 20px;
+            display: inline-block;
+        }
+
+        .start-btn {
+            background-color: #00b34d;
+            color: #ffffff;
+            border: 2px solid #00ff66;
+            padding: 14px 32px;
+            font-size: 18px;
+            font-weight: bold;
+            border-radius: 30px;
+            cursor: pointer;
+            box-shadow: 0 4px 15px rgba(0, 255, 102, 0.4);
+            transition: transform 0.15s, background-color 0.15s;
+        }
+
+        .start-btn:hover {
+            background-color: #00cc55;
+            transform: scale(1.05);
+        }
+
+        .start-btn:active {
+            transform: scale(0.95);
+        }
+
+        /* Інформаційна плашка (HUD) зверху */
+        #hud {
+            position: fixed;
+            top: 15px;
+            left: 50%;
+            transform: translateX(-50%);
+            background: rgba(0, 0, 0, 0.8);
+            border: 1px solid rgba(0, 255, 102, 0.6);
+            color: #ffffff;
+            padding: 10px 22px;
+            border-radius: 20px;
+            font-size: 14px;
+            z-index: 100;
+            display: none;
+            flex-direction: column;
+            align-items: center;
+            gap: 4px;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5);
+            pointer-events: none;
+            white-space: nowrap;
+        }
+
+        #hud .hud-title {
+            font-weight: bold;
+            color: #00ff66;
+            font-size: 15px;
+        }
+
+        #hud .hud-info {
+            color: #dddddd;
+            font-size: 13px;
+        }
+
+        #hud .hud-row {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            margin-top: 3px;
+            font-size: 12px;
+        }
+
+        #hud .hud-ws {
+            font-weight: bold;
+        }
+
+        #hud .hud-camera {
+            pointer-events: auto;
+            display: flex;
+            align-items: center;
+            gap: 5px;
+        }
+
+        #hud .camera-select {
+            background: #181818;
+            color: #00ff66;
+            border: 1px solid #00ff66;
+            border-radius: 6px;
+            padding: 2px 6px;
+            font-size: 12px;
+            cursor: pointer;
+            outline: none;
+        }
+    </style>
+</head>
+
+<body>
+
+    <!-- Стартовий екран для запиту дозволу на камеру -->
+    <div id="start-overlay">
+        <h1>Візуалізатор нахилу маркерів та WebSocket</h1>
+        <p>
+            Модуль відстежує нахил баркод-маркерів [-180°, +180°], малює зелену рамку
+            та транслює <b>"angle_x"</b> через WebSocket на порт 8767 для Scratch та інших застосунків.
+        </p>
+        <div style="margin-bottom: 20px; display: flex; align-items: center; gap: 8px;">
+            <label style="color:#00ff66; font-size:15px; font-weight:bold;">📷 Оберіть камеру:</label>
+            <select id="start-camera-select" style="background:#181818; color:#00ff66; border:1px solid #00ff66; border-radius:8px; padding:6px 14px; font-size:14px; cursor:pointer; outline:none;"></select>
+        </div>
+        <button id="start-btn" class="start-btn">Запустити камеру</button>
+    </div>
+
+    <!-- Верхня інформаційна панель -->
+    <div id="hud">
+        <div class="hud-title">AR Marker Visualizer</div>
+        <div id="hud-status" class="hud-info">Очікування маркерів...</div>
+        <div class="hud-row">
+            <div id="hud-ws" class="hud-ws">🔌 WS: Підключення...</div>
+            <div class="hud-camera">
+                <span>📷</span>
+                <select id="camera-select" class="camera-select" title="Оберіть веб-камеру"></select>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Читаємо параметр камери з URL, наприклад ?camera=0 або ?camera=1
+        const urlParams = new URLSearchParams(window.location.search);
+        const cameraParam = urlParams.get('camera');
+        const targetCameraIndex = cameraParam !== null ? parseInt(cameraParam, 10) : 0;
+
+        const startOverlay = document.getElementById('start-overlay');
+        const startBtn = document.getElementById('start-btn');
+        const startCameraSelect = document.getElementById('start-camera-select');
+        const hud = document.getElementById('hud');
+        const hudStatus = document.getElementById('hud-status');
+        const hudWs = document.getElementById('hud-ws');
+        const cameraSelect = document.getElementById('camera-select');
+
+        function onCameraChange(chosenIndex) {
+            const newParams = new URLSearchParams(window.location.search);
+            newParams.set('camera', chosenIndex);
+            window.location.href = window.location.pathname + '?' + newParams.toString();
+        }
+
+        cameraSelect.addEventListener('change', (e) => onCameraChange(e.target.value));
+        if (startCameraSelect) {
+            startCameraSelect.addEventListener('change', (e) => onCameraChange(e.target.value));
+        }
+
+        function startApp() {
+            startOverlay.style.display = 'none';
+            hud.style.display = 'flex';
+            initARApp();
+        }
+
+        startBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            startApp();
+        });
+
+        // Якщо камеру передано в URL (?camera=0 або ?camera=1), запускаємо одразу без очікування кліку
+        if (cameraParam !== null) {
+            window.addEventListener('DOMContentLoaded', () => {
+                startApp();
+            });
+        }
+
+        function populateCameraSelect(activeIdx, sourceInstance) {
+            function fill(videoDevices) {
+                [cameraSelect, startCameraSelect].forEach(selectEl => {
+                    if (!selectEl) return;
+                    selectEl.innerHTML = '';
+                    if (!videoDevices || videoDevices.length === 0) {
+                        const opt = document.createElement('option');
+                        opt.value = activeIdx;
+                        opt.textContent = 'Камера #' + activeIdx;
+                        selectEl.appendChild(opt);
+                        return;
+                    }
+                    videoDevices.forEach((dev, idx) => {
+                        const opt = document.createElement('option');
+                        opt.value = idx;
+                        const label = dev.label ? dev.label.replace(/\([0-9a-fA-F:]+\)/, '').trim() : ('Камера #' + idx);
+                        opt.textContent = '#' + idx + ': ' + (label.length > 28 ? label.substring(0, 28) + '...' : label);
+                        if (idx === activeIdx) {
+                            opt.selected = true;
+                        }
+                        selectEl.appendChild(opt);
+                    });
+                });
+            }
+
+            if (sourceInstance && sourceInstance.videoDevices && sourceInstance.videoDevices.length > 0) {
+                fill(sourceInstance.videoDevices);
+                return;
+            }
+
+            if (navigator.mediaDevices && navigator.mediaDevices.enumerateDevices) {
+                navigator.mediaDevices.enumerateDevices().then(devices => {
+                    const videoDevices = devices.filter(d => d.kind === 'videoinput');
+                    fill(videoDevices);
+                }).catch(() => {});
+            }
+        }
+
+        // Попереднє заповнення вибору камери
+        populateCameraSelect(targetCameraIndex);
+
+        function initARApp() {
+            var scene, camera, renderer, clock;
+            var arToolkitSource, arToolkitContext;
+            var mainContainer;
+            var markerRoots = [];
+            var visualizer;
+
+            // Баркод-маркери, які підтримуються (3x3 матриця, номери 1-12)
+            const barcodeList = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12];
+
+            // --- WebSocket Клієнт для передачі даних кута нахилу (20 Гц) ---
+            const WS_PORT = 8767;
+            const WS_URL = (location.protocol === 'https:' ? 'wss://' : 'ws://') + (location.hostname || 'localhost') + ':' + WS_PORT;
+            let ws = null;
+            let wsConnected = false;
+            let lastSendTime = 0;
+            const SEND_INTERVAL_MS = 50; // 20 Гц (50 мс), як у http.py
+
+            function updateWsStatus(connected, message) {
+                if (!hudWs) return;
+                if (connected) {
+                    hudWs.textContent = message || '🟢 WS: Підключено (8767)';
+                    hudWs.style.color = '#00ff66';
+                } else {
+                    hudWs.textContent = message || '🔴 WS: Пошук сервера...';
+                    hudWs.style.color = '#ffaa44';
+                }
+            }
+
+            let lastDetectedAngle = 0.0;
+            let lastDetectedMarker = null;
+
+            function connectWebSocket() {
+                try {
+                    ws = new WebSocket(WS_URL);
+                    ws.onopen = function () {
+                        wsConnected = true;
+                        updateWsStatus(true);
+                        console.log('WebSocket підключено до ' + WS_URL);
+                        ws.send(JSON.stringify({ role: "source", angle_x: 0, marker_id: null }));
+                    };
+                    ws.onclose = function () {
+                        wsConnected = false;
+                        updateWsStatus(false);
+                        setTimeout(connectWebSocket, 2000);
+                    };
+                    ws.onerror = function () {
+                        wsConnected = false;
+                        updateWsStatus(false);
+                    };
+                } catch (e) {
+                    wsConnected = false;
+                    updateWsStatus(false);
+                    setTimeout(connectWebSocket, 2000);
+                }
+            }
+
+            function transmitAngleData() {
+                if (!wsConnected || !ws || ws.readyState !== WebSocket.OPEN) return;
+
+                const now = performance.now();
+                if (now - lastSendTime < SEND_INTERVAL_MS) return;
+
+                // Знаходимо перший видимий маркер для передачі кута
+                let primaryIdx = -1;
+                for (let i = 0; i < markerRoots.length; i++) {
+                    if (markerRoots[i].visible) {
+                        primaryIdx = i;
+                        break;
+                    }
+                }
+
+                if (primaryIdx !== -1) {
+                    const angle = visualizer.getAngle(primaryIdx);
+                    if (angle !== null) {
+                        lastDetectedAngle = parseFloat(angle.toFixed(1));
+                        lastDetectedMarker = barcodeList[primaryIdx];
+                        if (hudStatus) {
+                            hudStatus.textContent = `Маркер #${lastDetectedMarker}: кут ${lastDetectedAngle > 0 ? '+' : ''}${lastDetectedAngle}°`;
+                        }
+                    }
+                } else {
+                    if (hudStatus) {
+                        hudStatus.textContent = 'Маркер не виявлено (піднесіть barcode 1-12 до камери)';
+                    }
+                }
+
+                const payload = JSON.stringify({
+                    "role": "source",
+                    "accX": 0,
+                    "accY": 0,
+                    "angle_x": lastDetectedAngle,
+                    "angle_y": 0,
+                    "marker_id": (primaryIdx !== -1) ? lastDetectedMarker : null
+                });
+                ws.send(payload);
+                lastSendTime = now;
+            }
+
+            // Запускаємо підключення WebSocket
+            connectWebSocket();
+
+            // 1. Створюємо сцену Three.js
+            scene = new THREE.Scene();
+
+            camera = new THREE.Camera();
+            scene.add(camera);
+
+            var ambientLight = new THREE.AmbientLight(0xffffff, 0.8);
+            scene.add(ambientLight);
+
+            renderer = new THREE.WebGLRenderer({
+                antialias: true,
+                alpha: true
+            });
+            renderer.setClearColor(new THREE.Color('lightgrey'), 0);
+            renderer.setSize(640, 480);
+            renderer.domElement.style.position = 'absolute';
+            renderer.domElement.style.top = '0px';
+            renderer.domElement.style.left = '0px';
+            document.body.appendChild(renderer.domElement);
+
+            clock = new THREE.Clock();
+
+            // 2. Ініціалізуємо джерело AR (камера за вказаним номером)
+            arToolkitSource = new THREEx.ArToolkitSource({
+                sourceType: 'webcam',
+                cameraIndex: targetCameraIndex
+            });
+
+            function onResize() {
+                arToolkitSource.onResize();
+                arToolkitSource.copySizeTo(renderer.domElement);
+                if (arToolkitContext && arToolkitContext.arController !== null) {
+                    arToolkitSource.copySizeTo(arToolkitContext.arController.canvas);
+                }
+            }
+
+            arToolkitSource.init(function onReady() {
+                onResize();
+                setTimeout(onResize, 500);
+                setTimeout(onResize, 1000);
+                setTimeout(onResize, 2000);
+                // Оновлюємо список назв камер після отримання дозволу користувача
+                populateCameraSelect(targetCameraIndex, arToolkitSource);
+            });
+
+            window.addEventListener('resize', onResize);
+            window.addEventListener('orientationchange', () => {
+                setTimeout(onResize, 300);
+            });
+
+            // 3. Ініціалізуємо контекст ARToolKit під баркод 3x3
+            arToolkitContext = new THREEx.ArToolkitContext({
+                cameraParametersUrl: '../data/camera_para.dat',
+                detectionMode: 'mono_and_matrix',
+                matrixCodeType: '3x3',
+                maxDetectionRate: 60,
+                canvasWidth: 640,
+                canvasHeight: 480
+            });
+
+            arToolkitContext.init(function onCompleted() {
+                camera.projectionMatrix.copy(arToolkitContext.getProjectionMatrix());
+            });
+
+            // 4. Створюємо контейнери для маркерів
+            mainContainer = new THREE.Group();
+            scene.add(mainContainer);
+
+            for (let i = 0; i < barcodeList.length; i++) {
+                const root = new THREE.Group();
+                markerRoots.push(root);
+                mainContainer.add(root);
+
+                // Створюємо контролер відстеження баркоду для кожного маркера
+                new THREEx.ArMarkerControls(arToolkitContext, root, {
+                    type: 'barcode',
+                    barcodeValue: barcodeList[i],
+                    size: 1.0
+                });
+            }
+
+            // 5. Підключаємо наш модуль візуалізації рамки та кута
+            visualizer = new MarkerAngleVisualizer({
+                camera: camera,
+                markerSize: 1.0,
+                borderThickness: 0.04,
+                borderColor: 0x00ff00,
+                textColor: '#00ff44',
+                labelOffset: new THREE.Vector3(0.85, 0.08, 0)
+            });
+
+            // Підключаємо візуалізатор до всіх створених маркерів
+            const indices = barcodeList.map((_, idx) => idx);
+            visualizer.attachToMarkers(markerRoots, indices);
+
+            // 6. Цикл анімації (Render loop)
+            function animate() {
+                requestAnimationFrame(animate);
+
+                if (arToolkitSource.ready !== false) {
+                    arToolkitContext.update(arToolkitSource.domElement);
+
+                    // Оновлення рамки та розрахунок кута для всіх видимих маркерів
+                    visualizer.update();
+
+                    // Передача кута нахилу через WebSocket (20 Гц)
+                    transmitAngleData();
+
+                    // Оновлення текстового статусу в HUD
+                    updateHud();
+                }
+
+                renderer.render(scene, camera);
+            }
+
+            function updateHud() {
+                let visibleCount = 0;
+                let statusDetails = [];
+
+                for (let i = 0; i < markerRoots.length; i++) {
+                    if (markerRoots[i].visible) {
+                        visibleCount++;
+                        const angle = visualizer.getAngle(i);
+                        const angleStr = (angle !== null) ? `${angle >= 0 ? '+' : ''}${angle.toFixed(1)}°` : '';
+                        statusDetails.push(`ID #${barcodeList[i]}: ${angleStr}`);
+                    }
+                }
+
+                if (visibleCount === 0) {
+                    hudStatus.textContent = 'Наведіть камеру на баркод-маркер';
+                    hudStatus.style.color = '#aaaaaa';
+                } else {
+                    hudStatus.textContent = `Знайдено (${visibleCount}): ` + statusDetails.join(' | ');
+                    hudStatus.style.color = '#00ff66';
+                }
+            }
+
+            animate();
+        }
+    </script>
+</body>
+
+</html>

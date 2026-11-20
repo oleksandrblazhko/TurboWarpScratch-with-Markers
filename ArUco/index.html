@@ -1,0 +1,47 @@
+<!DOCTYPE html>
+<html lang="uk">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ArUco Marker Angle Visualizer & Relay</title>
+    <link rel="stylesheet" href="css/main.css">
+</head>
+<body>
+
+    <video id="video" autoplay playsinline muted></video>
+    <canvas id="canvas"></canvas>
+
+    <!-- Інформаційна плашка (HUD) -->
+    <div id="hud">
+        <div class="hud-title">📐 ArUco Angle Visualizer</div>
+        <div id="hud-status">Очікування детекції ArUco...</div>
+        <div class="hud-row">
+            <span id="hud-ws" class="hud-ws" style="color: #ffaa44;">🔴 WS: Підключення...</span>
+            <div class="hud-camera">
+                <span>📷</span>
+                <select id="camera-select" class="camera-select" title="Оберіть веб-камеру"></select>
+            </div>
+        </div>
+    </div>
+
+    <!-- Екран завантаження OpenCV.js -->
+    <div id="loading-overlay">
+        <div class="spinner"></div>
+        <div id="loading-text" style="font-size: 15px; font-weight: 600;">Ініціалізація OpenCV.js та камери...</div>
+    </div>
+
+    <!-- Налаштування OpenCV -->
+    <script>
+        var Module = {
+            onRuntimeInitialized: function() {
+                console.log("OpenCV.js WebAssembly завантажено успішно.");
+            }
+        };
+    </script>
+    <script src="libs/opencv/opencv-4.14.js"></script>
+
+    <!-- Головний додаток -->
+    <script type="module" src="js/app.js"></script>
+
+</body>
+</html>
