@@ -88,3 +88,52 @@ def draw_hud(frame, camera_id, fps, clients_count, primary_angle=None, primary_i
 
     (sw, sh), _ = cv2.getTextSize(status_text, font, 0.5, 1)
     cv2.putText(frame, status_text, (w - sw - 14, 24), font, 0.5, color, 1, cv2.LINE_AA)
+
+def draw_bottom_hud(frame, speed_data=None, marker_size_cm=3.0):
+    """
+    Малює інформаційну панель швидкості у нижній частині відеокадру.
+    Відображає виключно Speed та Speed-max.
+    """
+    h, w = frame.shape[:2]
+    bar_height = 38
+    y_top = h - bar_height
+
+    # Нижня темна напівпрозора смужка
+    sub_img = frame[y_top:h, 0:w]
+    if sub_img.shape[0] > 0 and sub_img.shape[1] > 0:
+        dark_bar = np.full(sub_img.shape, (15, 15, 18), dtype=np.uint8)
+        frame[y_top:h, 0:w] = cv2.addWeighted(sub_img, 0.25, dark_bar, 0.75, 0)
+
+    font = cv2.FONT_HERSHEY_SIMPLEX
+
+    spd_px = 0.0
+    spd_cm = None
+    max_px = 0.0
+    max_cm = None
+    is_detected = False
+
+    if speed_data is not None:
+        spd_px = speed_data.get("speed_px", 0.0)
+        spd_cm = speed_data.get("speed_cm")
+        max_px = speed_data.get("max_speed_px", 0.0)
+        max_cm = speed_data.get("max_speed_cm")
+        is_detected = speed_data.get("is_detected", True)
+
+    if is_detected:
+        cur_spd_cm = spd_cm if spd_cm is not None else 0.0
+        cur_max_cm = max_cm if max_cm is not None else 0.0
+        left_text = f"Speed: {cur_spd_cm:4.1f} cm/s   |   Speed-max: {cur_max_cm:4.1f} cm/s"
+        text_color = (0, 255, 102) if cur_spd_cm > 0.1 else (180, 180, 190)
+    else:
+        cur_max_cm = max_cm if max_cm is not None else 0.0
+        left_text = f"Speed:   ---   |   Speed-max: {cur_max_cm:4.1f} cm/s"
+        text_color = (150, 150, 160)
+
+    cv2.putText(frame, left_text, (12, h - 13), font, 0.48, text_color, 1, cv2.LINE_AA)
+
+    # Права частина: масштаб/розмір маркера та гаряча клавіша
+    if marker_size_cm is not None:
+        right_text = f"Marker: {marker_size_cm:.1f} cm | [r] reset max"
+        (rw, rh), _ = cv2.getTextSize(right_text, font, 0.43, 1)
+        cv2.putText(frame, right_text, (w - rw - 14, h - 13), font, 0.43, (160, 160, 170), 1, cv2.LINE_AA)
+

@@ -32,7 +32,8 @@ from ArUcoNative.camera import create_camera
 from ArUcoNative.detector import NativeArucoDetector
 from ArUcoNative.angle import calculate_tilt_angle
 from ArUcoNative.filters.ema_filter import AngleEmaFilter
-from ArUcoNative.visualization import draw_marker_info, draw_hud
+from ArUcoNative.speed import MarkerSpeedTracker
+from ArUcoNative.visualization import draw_marker_info, draw_hud, draw_bottom_hud
 
 # Глобальний стан для трансляції
 STATE_LOCK = threading.Lock()
@@ -43,7 +44,15 @@ SENSOR_DATA = {
     "accY": 0.0,
     "angle_x": 0.0,
     "angle_y": 0.0,
-    "marker_id": None
+    "marker_id": None,
+    "speed_px": 0.0,
+    "speed_cm": 0.0,
+    "max_speed_px": 0.0,
+    "max_speed_cm": 0.0,
+    "vel_x": 0.0,
+    "vel_y": 0.0,
+    "pos_x": 0.0,
+    "pos_y": 0.0
 }
 
 IS_RUNNING = True
@@ -59,7 +68,15 @@ async def broadcast_loop():
                         "accY": SENSOR_DATA["accY"],
                         "angle_x": SENSOR_DATA["angle_x"],
                         "angle_y": SENSOR_DATA["angle_y"],
-                        "marker_id": SENSOR_DATA["marker_id"]
+                        "marker_id": SENSOR_DATA["marker_id"],
+                        "speed_px": SENSOR_DATA["speed_px"],
+                        "speed_cm": SENSOR_DATA["speed_cm"],
+                        "max_speed_px": SENSOR_DATA["max_speed_px"],
+                        "max_speed_cm": SENSOR_DATA["max_speed_cm"],
+                        "vel_x": SENSOR_DATA["vel_x"],
+                        "vel_y": SENSOR_DATA["vel_y"],
+                        "pos_x": SENSOR_DATA["pos_x"],
+                        "pos_y": SENSOR_DATA["pos_y"]
                     })
                     clients = list(CONNECTED_CLIENTS)
                 else:
@@ -155,6 +172,17 @@ def main():
         help="Висота кадру камери. За замовчуванням: 480"
     )
     parser.add_argument(
+        "--marker-size",
+        type=float,
+        default=3.0,
+        help="Фізичний розмір сторони маркера в см для обчислення швидкості в см/с. За замовчуванням: 3.0"
+    )
+    parser.add_argument(
+        "--fast-shutter",
+        action="store_true",
+        help="Увімкнути режим короткої витримки камери для зменшення Motion Blur (якщо підтримується драйвером)"
+    )
+    parser.add_argument(
         "--no-filter",
         action="store_true",
         help="Вимкнути фільтр згладжування кута (EMA)"
@@ -174,19 +202,28 @@ def main():
     print(f"Словник ArUco:      {args.dict}")
     print(f"WebSocket порт:     ws://localhost:{args.port} (для Scratch)")
     print(f"Роздільна здатність:{args.width}x{args.height}")
+    print(f"Розмір маркера:     {args.marker_size} см (для см/с)")
     print(f"Згладжування (EMA): {'Вимкнено' if args.no_filter else 'Увімкнено (alpha=0.35)'}")
     print("-" * 74)
 
     # 1. Запуск WebSocket-сервера для Scratch
     start_websocket_thread(args.port)
 
-    # 2. Ініціалізація детектора ArUco
+    # 2. Ініціалізація детектора ArUco та трекера швидкості
     detector = NativeArucoDetector(args.dict)
     angle_filter = None if args.no_filter else AngleEmaFilter(alpha=0.35)
+    speed_tracker = MarkerSpeedTracker(marker_size_cm=args.marker_size)
 
     # 3. Ініціалізація камери
     try:
         cap = create_camera(args.camera, args.width, args.height)
+        if args.fast_shutter:
+            try:
+                cap.set(cv2.CAP_PROP_AUTO_EXPOSURE, 0.25)
+                cap.set(cv2.CAP_PROP_EXPOSURE, -6)
+                print("[Camera] Режим короткої витримки (--fast-shutter) активовано.")
+            except Exception:
+                pass
     except RuntimeError as e:
         print(f"\nПомилка: {e}")
         return
@@ -219,6 +256,7 @@ def main():
 
             detected_marker_id = None
             detected_angle = None
+            speed_data = None
 
             if ids is not None and len(ids) > 0:
                 flat_ids = ids.flatten()
@@ -232,29 +270,54 @@ def main():
                     if i == 0:
                         detected_marker_id = m_id
                         detected_angle = smooth_angle
+                        speed_data = speed_tracker.update(m_corners, current_time)
 
                     if not args.no_preview:
                         draw_marker_info(frame, m_corners, m_id, smooth_angle)
             else:
-                if angle_filter:
-                    angle_filter.reset()
+                speed_data = speed_tracker.on_frame_missing(current_time)
+                # Якщо маркер відсутній довше пільгового буфера coasting - скидаємо згладжування кута
+                if speed_tracker.missing_frames > speed_tracker.max_missing_frames:
+                    if angle_filter:
+                        angle_filter.reset()
 
             # Оновлення стану для трансляції у Scratch
             with STATE_LOCK:
-                if detected_angle is not None:
+                if detected_angle is not None and speed_data is not None and speed_data.get("is_detected"):
                     SENSOR_DATA["angle_x"] = detected_angle
                     SENSOR_DATA["marker_id"] = detected_marker_id
+                    SENSOR_DATA["speed_px"] = speed_data["speed_px"]
+                    SENSOR_DATA["speed_cm"] = speed_data["speed_cm"] if speed_data["speed_cm"] is not None else 0.0
+                    SENSOR_DATA["max_speed_px"] = speed_data["max_speed_px"]
+                    SENSOR_DATA["max_speed_cm"] = speed_data["max_speed_cm"] if speed_data["max_speed_cm"] is not None else 0.0
+                    SENSOR_DATA["vel_x"] = speed_data["vx_px"]
+                    SENSOR_DATA["vel_y"] = speed_data["vy_px"]
+                    SENSOR_DATA["pos_x"] = speed_data["center_x"]
+                    SENSOR_DATA["pos_y"] = speed_data["center_y"]
                 else:
                     SENSOR_DATA["marker_id"] = None
+                    SENSOR_DATA["speed_px"] = 0.0
+                    SENSOR_DATA["speed_cm"] = 0.0
+                    SENSOR_DATA["max_speed_px"] = speed_data["max_speed_px"] if speed_data else 0.0
+                    SENSOR_DATA["max_speed_cm"] = speed_data["max_speed_cm"] if speed_data and speed_data["max_speed_cm"] is not None else 0.0
+                    SENSOR_DATA["vel_x"] = 0.0
+                    SENSOR_DATA["vel_y"] = 0.0
+                    SENSOR_DATA["pos_x"] = 0.0
+                    SENSOR_DATA["pos_y"] = 0.0
 
                 clients_cnt = len(CONNECTED_CLIENTS)
 
             # Консольний динамічний рядок
             marker_str = f"#{detected_marker_id}" if detected_marker_id is not None else "N/A"
             angle_str = f"{SENSOR_DATA['angle_x']:+6.1f}°" if detected_marker_id is not None else "  ---  "
+            speed_str = (
+                f"{SENSOR_DATA['speed_cm']:4.1f} cm/s"
+                if detected_marker_id is not None else "   ---   "
+            )
+            max_str = f"{SENSOR_DATA['max_speed_cm']:4.1f} cm/s"
             print(
                 f"\r[Native Tracker] FPS: {fps:4.1f} | Маркер: {marker_str:<4} | "
-                f"angle_x: {angle_str} | Scratch клієнтів: {clients_cnt}   ",
+                f"angle_x: {angle_str} | Speed: {speed_str} | Max: {max_str} | WS: {clients_cnt}   ",
                 end="",
                 flush=True
             )
@@ -262,11 +325,14 @@ def main():
             # Візуалізація вікна OpenCV
             if not args.no_preview:
                 draw_hud(frame, args.camera, fps, clients_cnt, detected_angle, detected_marker_id)
+                draw_bottom_hud(frame, speed_data, args.marker_size)
                 cv2.imshow(window_name, frame)
 
                 key = cv2.waitKey(1) & 0xFF
                 if key == ord('q') or key == 27:  # 'q' або Esc
                     break
+                elif key == ord('r') or key == ord('R'):  # Скидання зафіксованої Speed-max
+                    speed_tracker.reset_max()
 
     except KeyboardInterrupt:
         print("\n\nЗупинка за сигналом Ctrl+C...")

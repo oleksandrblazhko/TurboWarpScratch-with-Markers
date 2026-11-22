@@ -33,11 +33,18 @@ class NativeArucoDetector:
         self.dictionary = cv2.aruco.getPredefinedDictionary(dict_const)
         self.dict_name = clean_name
 
-        # Налаштування параметрів детектора для стабільності
+        # Налаштування параметрів детектора для стабільності та стійкості до Motion Blur
         self.parameters = cv2.aruco.DetectorParameters()
         self.parameters.polygonalApproxAccuracyRate = 0.05
         self.parameters.minMarkerPerimeterRate = 0.04
         self.parameters.errorCorrectionRate = 0.8
+
+        # Оптимізація під змазування (Motion Blur)
+        self.parameters.perspectiveRemoveIgnoredMarginPerCell = 0.20  # Зчитування суворо з центру бітів
+        self.parameters.adaptiveThreshWinSizeMin = 3
+        self.parameters.adaptiveThreshWinSizeMax = 27
+        self.parameters.adaptiveThreshWinSizeStep = 4                # Дрібніший крок адаптивного порогу
+        self.parameters.cornerRefinementMethod = cv2.aruco.CORNER_REFINE_SUBPIX  # Субпіксельне уточнення кутів
 
         # Перевірка наявності нового класу ArucoDetector (OpenCV 4.7+)
         if hasattr(cv2.aruco, "ArucoDetector"):
